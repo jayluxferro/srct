@@ -1,0 +1,26 @@
+{
+  "name": "srct",
+  "version": "1.0.0",
+  "description": "Streaming Reservoir Convergence Theorem — a novel mathematical framework for multi-provider adaptive streaming with concurrent probing, warm standby failover, and prospect-weighted quality selection.",
+  "type": "module",
+  "main": "./src/index.js",
+  "types": "./src/index.ts",
+  "files": ["src/"],
+  "scripts": {
+    "verify": "npx tsx scripts/verify.ts",
+    "arxiv": "bash scripts/arxiv-package.sh"
+  },
+  "keywords": [
+    "streaming", "adaptive-bitrate", "abr", "hls", "dash",
+    "multi-provider", "failover", "reservoir", "prospect-theory",
+    "video-streaming", "cdn", "quality-selection"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sperixlabs/srct"
+  },
+  "devDependencies": {
+    "tsx": "^4.0.0"
+  }
+}

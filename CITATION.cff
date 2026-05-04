@@ -1,0 +1,26 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite the accompanying paper."
+title: "The Streaming Reservoir Convergence Theorem: A Prospect-Theoretic Framework for Multi-Provider Adaptive Streaming"
+authors:
+  - given-names: Justice Owusu
+    family-names: Agyemang
+    email: jay@sperixlabs.org
+    affiliation: "Sperix Labs; VIA Cybersecurity Lab, KNUST; Quantum and Assistive Technologies Lab, KNUST"
+  - given-names: Jerry John
+    family-names: Kponyo
+    affiliation: "Quantum and Assistive Technologies Lab, KNUST"
+  - given-names: Kwame Opuni-Boachie Obour
+    family-names: Agyekum
+    affiliation: "VIA Cybersecurity Lab, KNUST"
+  - given-names: Obed Kwasi
+    family-names: Somuah
+    affiliation: "VIA Cybersecurity Lab, KNUST"
+  - given-names: Elliot
+    family-names: Amponsah
+    affiliation: "Quantum and Assistive Technologies Lab, KNUST"
+  - given-names: Godfred Manu Addo
+    family-names: Boakye
+    affiliation: "Quantum and Assistive Technologies Lab, KNUST"
+year: 2026
+repository-code: "https://github.com/sperixlabs/srct"
+license: MIT
