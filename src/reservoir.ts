@@ -678,6 +678,51 @@ export class StreamingReservoir {
     return ok;
   }
 
+  /**
+   * Re-acquire: soft-reset while preserving exhausted candidates.
+   * Streams that failed during playback remain excluded across cycles.
+   */
+  async reacquire(candidates: StreamCandidate[], signal?: AbortSignal): Promise<number> {
+    this.stopHealthChecks();
+    this.state.slots = [];
+    this.state.activeIndex = -1;
+    this.state.lastSwitchTime = 0;
+    this.state.filling = true;
+
+    if (candidates.length === 0) { this.state.filling = false; return -1; }
+    const sorted = sortCandidatesByQuality(candidates);
+    const results = await concurrentProbe(sorted, this.config, this.proxyUrlBuilder, signal);
+    if (signal?.aborted) { this.state.filling = false; return -1; }
+
+    for (const r of results) {
+      if (this.state.slots.length >= this.config.reservoirSize) break;
+      if (!r.ok) { this.state.exhaustedCandidates.add(sorted[r.index]?.url ?? ""); continue; }
+      const c = sorted[r.index];
+      if (!c) continue;
+      if (this.state.exhaustedCandidates.has(c.url)) continue;
+      this.state.slots.push({
+        candidate: c, proxyUrl: this.proxyUrlBuilder(c),
+        lastVerifiedAt: Date.now(), verificationCount: 1, manifestPrefetched: false,
+      });
+    }
+    for (const r of results) {
+      if (!r.ok) this.state.exhaustedCandidates.add(sorted[r.index]?.url ?? "");
+    }
+
+    if (this.state.slots.length > 0) {
+      this.reSort();
+      this.emit({ type: "slot_filled", timestamp: Date.now() });
+      this.emit({ type: "switch_active", timestamp: Date.now() });
+      this.startHealthChecks();
+      this.prefetchStandbys(signal);
+    }
+    this.state.filling = false;
+    if (this.state.slots.length >= this.config.reservoirSize) {
+      this.emit({ type: "reservoir_full", timestamp: Date.now() });
+    }
+    return this.state.activeIndex;
+  }
+
   /** Reset for a new viewing session. */
   reset(): void {
     this.stopHealthChecks();
