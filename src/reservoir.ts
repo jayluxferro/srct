@@ -93,6 +93,8 @@ export interface ReservoirConfig {
   availabilityThreshold: number;
   /** If true, streams without detectable audio are rejected during probe. Default: true. */
   rejectVideoOnly: boolean;
+  /** Minimum time in ms between failover transitions. Default: 3000. Prevents cascade. */
+  failoverCooldownMs: number;
 }
 
 export const DEFAULT_CONFIG: ReservoirConfig = {
@@ -105,6 +107,7 @@ export const DEFAULT_CONFIG: ReservoirConfig = {
   switchCost: 0.12,
   availabilityThreshold: 0.3,
   rejectVideoOnly: true,
+  failoverCooldownMs: 3_000,
 };
 
 export interface ReservoirState {
@@ -610,13 +613,29 @@ export class StreamingReservoir {
     return newActive;
   }
 
+  /** Check whether a failover is allowed right now (cooldown not active). */
+  canFailover(): boolean {
+    if (this.state.slots.length <= 1) return false;
+    if (this.state.activeIndex < 0) return false;
+    return (Date.now() - this.state.lastSwitchTime) >= this.config.failoverCooldownMs;
+  }
+
   /**
    * Failover: mark active as dead, promote best standby (Theorem 1).
+   *
+   * Enforces a failover cooldown to prevent cascading through all slots
+   * when a transient issue affects multiple streams. Returns undefined if
+   * the cooldown hasn't elapsed — retry after the cooldown period.
    */
   failoverActive(): ReservoirSlot | undefined {
     const now = Date.now();
     const { activeIndex, slots } = this.state;
     if (activeIndex < 0 || activeIndex >= slots.length) return undefined;
+
+    // Cooldown guard: prevent cascade through all slots in milliseconds
+    if (slots.length > 1 && (now - this.state.lastSwitchTime) < this.config.failoverCooldownMs) {
+      return undefined;
+    }
 
     const failed = slots[activeIndex];
     if (!failed) return undefined;
