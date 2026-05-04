@@ -639,6 +639,10 @@ export class StreamingReservoir {
 
     const failed = slots[activeIndex];
     if (!failed) return undefined;
+    // Track per-candidate exhaustion count + timestamp
+    const st = this.state as unknown as Record<string, unknown>;
+    st[`_ex_count_${failed.candidate.url}`] = ((st[`_ex_count_${failed.candidate.url}`] as number) ?? 0) + 1;
+    st[`_ex_at_${failed.candidate.url}`] = now;
     this.state.exhaustedCandidates.add(failed.candidate.url);
     this.state.slots.splice(activeIndex, 1);
 
@@ -679,8 +683,10 @@ export class StreamingReservoir {
   }
 
   /**
-   * Re-acquire: soft-reset while preserving exhausted candidates.
-   * Streams that failed during playback remain excluded across cycles.
+   * Re-acquire: soft-reset with time-windowed exhaustion.
+   * Exhausted candidates become eligible again after 30s (transient issues
+   * likely resolved). Permanent exclusion only after 2 exhaustions within
+   * the window — prevents infinite loops on genuinely dead streams.
    */
   async reacquire(candidates: StreamCandidate[], signal?: AbortSignal): Promise<number> {
     this.stopHealthChecks();
@@ -694,15 +700,24 @@ export class StreamingReservoir {
     const results = await concurrentProbe(sorted, this.config, this.proxyUrlBuilder, signal);
     if (signal?.aborted) { this.state.filling = false; return -1; }
 
+    const now = Date.now();
+    const WINDOW = 30_000;
+    const MAX_EX = 2;
+    // Track per-candidate exhaustion counts on the state object
+    const state = this.state as unknown as Record<string, unknown>;
+
     for (const r of results) {
       if (this.state.slots.length >= this.config.reservoirSize) break;
       if (!r.ok) { this.state.exhaustedCandidates.add(sorted[r.index]?.url ?? ""); continue; }
       const c = sorted[r.index];
       if (!c) continue;
-      if (this.state.exhaustedCandidates.has(c.url)) continue;
+      const key = `_ex_count_${c.url}`;
+      const count = (state[key] as number) ?? 0;
+      const lastAt = (state[`_ex_at_${c.url}`] as number) ?? 0;
+      if (count >= MAX_EX && (now - lastAt) < WINDOW) continue;
       this.state.slots.push({
         candidate: c, proxyUrl: this.proxyUrlBuilder(c),
-        lastVerifiedAt: Date.now(), verificationCount: 1, manifestPrefetched: false,
+        lastVerifiedAt: now, verificationCount: count > 0 ? 1 : 1, manifestPrefetched: false,
       });
     }
     for (const r of results) {
@@ -711,14 +726,14 @@ export class StreamingReservoir {
 
     if (this.state.slots.length > 0) {
       this.reSort();
-      this.emit({ type: "slot_filled", timestamp: Date.now() });
-      this.emit({ type: "switch_active", timestamp: Date.now() });
+      this.emit({ type: "slot_filled", timestamp: now });
+      this.emit({ type: "switch_active", timestamp: now });
       this.startHealthChecks();
       this.prefetchStandbys(signal);
     }
     this.state.filling = false;
     if (this.state.slots.length >= this.config.reservoirSize) {
-      this.emit({ type: "reservoir_full", timestamp: Date.now() });
+      this.emit({ type: "reservoir_full", timestamp: now });
     }
     return this.state.activeIndex;
   }
