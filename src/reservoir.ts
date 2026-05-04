@@ -91,6 +91,8 @@ export interface ReservoirConfig {
   switchCost: number;
   /** Minimum availability for reservoir membership. Default: 0.3. */
   availabilityThreshold: number;
+  /** If true, streams without detectable audio are rejected during probe. Default: true. */
+  rejectVideoOnly: boolean;
 }
 
 export const DEFAULT_CONFIG: ReservoirConfig = {
@@ -102,6 +104,7 @@ export const DEFAULT_CONFIG: ReservoirConfig = {
   probeTimeoutMs: 3_000,
   switchCost: 0.12,
   availabilityThreshold: 0.3,
+  rejectVideoOnly: true,
 };
 
 export interface ReservoirState {
@@ -218,6 +221,29 @@ export function defaultProxyUrlBuilder(candidate: StreamCandidate): string {
 }
 
 // ---------------------------------------------------------------------------
+// Audio Detection
+// ---------------------------------------------------------------------------
+
+const AUDIO_CODEC_PATTERNS = [
+  /mp4a/i, /ac-3/i, /ec-3/i, /ec\+3/i, /opus/i, /vorbis/i, /flac/i,
+  /dts/i, /pcm/i, /eac3/i, /aac/i, /\.mp3/i,
+];
+
+const AUDIO_DETECT_BUFFER_BYTES = 8192;
+
+function detectAudioInBuffer(buffer: string): boolean {
+  if (buffer.includes("#EXT-X-MEDIA:TYPE=AUDIO") || buffer.includes("#EXT-X-MEDIA:TYPE=audio")) return true;
+  if (buffer.includes("CODECS=")) {
+    for (const p of AUDIO_CODEC_PATTERNS) { if (p.test(buffer)) return true; }
+  }
+  if (buffer.includes('AUDIO="') || buffer.includes("AUDIO='")) return true;
+  if (buffer.includes('mimeType="audio/') || buffer.includes("mimeType='audio/")) return true;
+  if (buffer.includes('contentType="audio"')) return true;
+  if (buffer.includes("mp4a") && !buffer.includes("#EXT")) return true;
+  return false;
+}
+
+// ---------------------------------------------------------------------------
 // Concurrent Probe (Theorem 2)
 // ---------------------------------------------------------------------------
 
@@ -226,11 +252,17 @@ export interface ProbeResult {
   ok: boolean;
   status?: number;
   latencyMs: number;
+  /** Whether the stream contains detectable audio. True if unknown (don't reject). */
+  hasAudio: boolean;
 }
 
 /**
  * Probe all N candidates concurrently. Returns results sorted: working first
  * (by latency), then failed. This is the Theorem 2 speedup implementation.
+ *
+ * When config.rejectVideoOnly is true (default), probes also scan the first
+ * ~8KB of the manifest for audio tracks. Streams without detectable audio
+ * are marked as failed so the reservoir never selects them.
  */
 export async function concurrentProbe(
   candidates: StreamCandidate[],
@@ -247,7 +279,7 @@ export async function concurrentProbe(
 
   async function probeOne(index: number): Promise<ProbeResult> {
     const c = candidates[index];
-    if (!c) return { index, ok: false, latencyMs: 0 };
+    if (!c) return { index, ok: false, latencyMs: 0, hasAudio: true };
     const url = proxyUrlBuilder(c);
     const start = performance.now();
     try {
@@ -258,10 +290,44 @@ export async function concurrentProbe(
       const r = await fetch(url, { signal: ctrl.signal });
       clearTimeout(t);
       signal?.removeEventListener("abort", onAbort);
-      r.body?.cancel().catch(() => {});
-      return { index, ok: r.ok || r.status === 206, status: r.status, latencyMs: performance.now() - start };
+
+      const statusOk = r.ok || r.status === 206;
+
+      // Audio detection: read first ~8KB of manifest to scan for audio tracks
+      let hasAudio = true;
+      if (statusOk && config.rejectVideoOnly) {
+        try {
+          const reader = r.body?.getReader();
+          if (reader) {
+            const chunks: Uint8Array[] = [];
+            let total = 0;
+            while (total < AUDIO_DETECT_BUFFER_BYTES) {
+              const { done, value } = await reader.read();
+              if (done || !value) break;
+              chunks.push(value);
+              total += value.byteLength;
+            }
+            reader.cancel().catch(() => {});
+            const combined = new Uint8Array(chunks.reduce((s, c) => s + c.length, 0));
+            let off = 0;
+            for (const c of chunks) { combined.set(c, off); off += c.length; }
+            hasAudio = detectAudioInBuffer(new TextDecoder().decode(combined).slice(0, AUDIO_DETECT_BUFFER_BYTES));
+          } else {
+            r.body?.cancel().catch(() => {});
+          }
+        } catch {
+          r.body?.cancel().catch(() => {});
+        }
+      } else {
+        r.body?.cancel().catch(() => {});
+      }
+
+      return {
+        index, ok: statusOk && (hasAudio || !config.rejectVideoOnly),
+        status: r.status, latencyMs: performance.now() - start, hasAudio,
+      };
     } catch {
-      return { index, ok: false, latencyMs: performance.now() - start };
+      return { index, ok: false, latencyMs: performance.now() - start, hasAudio: true };
     }
   }
 
