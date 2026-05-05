@@ -127,7 +127,7 @@ const reservoir = new StreamingReservoir(
 
 ## Paper
 
-The accompanying paper is available on arXiv (citation forthcoming).
+The accompanying paper is published on arXiv: [arXiv:2605.02761](https://arxiv.org/abs/2605.02761).
 The paper provides full mathematical proofs, algorithm pseudocode,
 TikZ figures, and a comprehensive survey of related work (48 references).
 
@@ -141,7 +141,9 @@ TikZ figures, and a comprehensive survey of related work (48 references).
           Agyekum, Kwame Opuni-Boachie Obour and Somuah, Obed Kwasi and
           Amponsah, Elliot and Boakye, Godfred Manu Addo},
   journal={arXiv preprint},
-  year={2026}
+  year={2026},
+  note={arXiv:2605.02761},
+  url={https://arxiv.org/abs/2605.02761}
 }
 ```
 
